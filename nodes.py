@@ -6,7 +6,12 @@ import logging
 import sys
 import folder_paths
 
-from .model_cache import model_cache, USE_BINDING, normalize_path_for_os
+from .model_cache import (
+    model_cache,
+    USE_BINDING,
+    resolve_gguf_model_path,
+    normalize_path_for_os,
+)
 
 
 def _resolve_llama_cli_path(win_path: str, linux_path: str):
@@ -58,6 +63,10 @@ class LoadGGUFModel:
                     "default": "",
                     "tooltip": "Path to llama-cli on Linux, used when running on Linux"
                 }),
+                "use_subprocess": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Use llama-cli.exe instead of llama-cpp-python (use if binding fails but CLI works)"
+                }),
             }
         }
 
@@ -69,17 +78,15 @@ class LoadGGUFModel:
 
     def load_model(self, model_name: str, gpu_layers: int = 99,
                    context_size: int = 32768, win_llama_cli_path: str = "",
-                   linux_llama_cli_path: str = ""):
-        model_name = normalize_path_for_os(model_name)
-        model_path = normalize_path_for_os(
-            folder_paths.get_full_path(LLM_FOLDER, model_name)
-        )
+                   linux_llama_cli_path: str = "", use_subprocess: bool = False):
+        model_path = resolve_gguf_model_path(model_name, LLM_FOLDER)
 
         model = model_cache.get(
             model_path=model_path,
             llama_cli_path=_resolve_llama_cli_path(win_llama_cli_path, linux_llama_cli_path),
             n_gpu_layers=gpu_layers,
             n_ctx=context_size,
+            use_subprocess=use_subprocess,
         )
 
         return (model,)
@@ -201,8 +208,11 @@ class LLMChat:
         # Build prompt
         prompt = self._build_prompt(system_prompt, history, user_prompt)
 
-        # Run inference
-        if USE_BINDING:
+        # Run inference. Dispatch on the actual model object, not the global
+        # USE_BINDING flag: the loader may have fallen back to a subprocess model
+        # even though llama-cpp-python is importable.
+        is_subprocess = getattr(model, "is_subprocess", False)
+        if not is_subprocess:
             # Use llama-cpp-python binding
             output = model(
                 prompt,
