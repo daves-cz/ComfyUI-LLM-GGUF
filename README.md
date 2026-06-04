@@ -13,6 +13,9 @@ ComfyUI custom nodes for LLM GGUF model inference.
 - Output condition prefix (Chinese T5 format)
 - Supports llama-cpp-python binding or subprocess fallback
 
+- works on WINDOWS and on LINUX
+- you can set both path and use same workflow to work on both systems
+
 ## Nodes
 
 ### Load GGUF Model
