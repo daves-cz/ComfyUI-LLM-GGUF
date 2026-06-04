@@ -3,9 +3,16 @@
 # ComfyUI nodes for LLM GGUF inference
 
 import logging
+import sys
 import folder_paths
 
-from .model_cache import model_cache, USE_BINDING
+from .model_cache import model_cache, USE_BINDING, normalize_path_for_os
+
+
+def _resolve_llama_cli_path(win_path: str, linux_path: str):
+    """Pick the llama-cli path for the current OS."""
+    path = (win_path if sys.platform == "win32" else linux_path).strip()
+    return normalize_path_for_os(path) if path else None
 
 # Register LLM folder for GGUF models
 LLM_FOLDER = "LLM"
@@ -43,9 +50,13 @@ class LoadGGUFModel:
                 }),
             },
             "optional": {
-                "llama_cli_path": ("STRING", {
+                "win_llama_cli_path": ("STRING", {
                     "default": "",
-                    "tooltip": "Path to llama-cli.exe (for subprocess fallback)"
+                    "tooltip": "Path to llama-cli on Windows (e.g. llama-cli.exe), used when running on Windows"
+                }),
+                "linux_llama_cli_path": ("STRING", {
+                    "default": "",
+                    "tooltip": "Path to llama-cli on Linux, used when running on Linux"
                 }),
             }
         }
@@ -57,12 +68,16 @@ class LoadGGUFModel:
     TITLE = "Load GGUF Model"
 
     def load_model(self, model_name: str, gpu_layers: int = 99,
-                   context_size: int = 32768, llama_cli_path: str = ""):
-        model_path = folder_paths.get_full_path(LLM_FOLDER, model_name)
+                   context_size: int = 32768, win_llama_cli_path: str = "",
+                   linux_llama_cli_path: str = ""):
+        model_name = normalize_path_for_os(model_name)
+        model_path = normalize_path_for_os(
+            folder_paths.get_full_path(LLM_FOLDER, model_name)
+        )
 
         model = model_cache.get(
             model_path=model_path,
-            llama_cli_path=llama_cli_path if llama_cli_path else None,
+            llama_cli_path=_resolve_llama_cli_path(win_llama_cli_path, linux_llama_cli_path),
             n_gpu_layers=gpu_layers,
             n_ctx=context_size,
         )

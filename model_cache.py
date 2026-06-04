@@ -4,6 +4,7 @@
 
 import os
 import re
+import sys
 import subprocess
 import tempfile
 import logging
@@ -26,25 +27,45 @@ except ImportError:
     logging.warning("llama-cpp-python not found, falling back to subprocess mode")
 
 
+def normalize_path_for_os(path: str) -> str:
+    """Normalize path separators for the current OS (/ on Linux, \\ on Windows)."""
+    if not path:
+        return path
+    if sys.platform == "win32":
+        path = path.replace("/", "\\")
+    else:
+        path = path.replace("\\", "/")
+    return os.path.normpath(path)
+
+
 class SubprocessModel:
     """Fallback model wrapper using llama-cli.exe subprocess."""
 
     def __init__(self, model_path: str, llama_cli_path: str = None, **kwargs):
-        self.model_path = model_path
-        self.llama_cli_path = llama_cli_path or self._find_llama_cli()
+        self.model_path = normalize_path_for_os(model_path)
+        cli = llama_cli_path or self._find_llama_cli()
+        self.llama_cli_path = normalize_path_for_os(cli)
         self.n_gpu_layers = kwargs.get("n_gpu_layers", 99)
         self.n_ctx = kwargs.get("n_ctx", 32768)
 
     def _find_llama_cli(self) -> str:
-        """Find llama-cli.exe in common locations."""
-        possible_paths = [
-            r"C:\Users\Administrator\Desktop\222\llama.cpp\build\bin\llama-cli.exe",
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "llama-cli.exe"),
-        ]
+        """Find llama-cli in common locations for the current OS."""
+        if sys.platform == "win32":
+            possible_paths = [
+                r"C:\Users\Administrator\Desktop\222\llama.cpp\build\bin\llama-cli.exe",
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "llama-cli.exe"),
+            ]
+        else:
+            possible_paths = [
+                "/usr/local/bin/llama-cli",
+                "/usr/bin/llama-cli",
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "llama-cli"),
+            ]
         for path in possible_paths:
             if os.path.exists(path):
                 return path
-        raise FileNotFoundError("llama-cli.exe not found. Please specify llama_cli_path.")
+        binary = "llama-cli.exe" if sys.platform == "win32" else "llama-cli"
+        raise FileNotFoundError(f"{binary} not found. Please set the path for your OS in Load GGUF Model.")
 
     def __call__(self, prompt: str, max_tokens: int = 256, temperature: float = 0.7,
                  top_p: float = 0.9, top_k: int = 40, repeat_penalty: float = 1.1,
@@ -76,17 +97,18 @@ class SubprocessModel:
                 "-e",
             ]
 
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
+            popen_kwargs = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.DEVNULL,
+                "bufsize": 0,
+            }
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                popen_kwargs["startupinfo"] = startupinfo
 
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                bufsize=0,
-                startupinfo=startupinfo,
-            )
+            process = subprocess.Popen(cmd, **popen_kwargs)
 
             result = []
             buffer = b""
@@ -164,6 +186,9 @@ class ModelCache:
 
     def get(self, model_path: str, llama_cli_path: str = None, **kwargs) -> Any:
         """Get or load a model from cache."""
+        model_path = normalize_path_for_os(model_path)
+        if llama_cli_path:
+            llama_cli_path = normalize_path_for_os(llama_cli_path)
         # Create cache key from path and important parameters
         key = (model_path, kwargs.get("n_gpu_layers", 99), kwargs.get("n_ctx", 32768))
 
